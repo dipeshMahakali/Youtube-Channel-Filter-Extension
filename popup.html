@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>YouTube Play All</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Play All Videos</h2>
+    <div id="status" class="status info">Ready</div>
+    
+    <div id="controls">
+      <button id="btn-gather" class="btn primary">Gather Videos & Play</button>
+      <button id="btn-clear" class="btn secondary" style="display: none;">Clear Playlist</button>
+    </div>
+
+    <div id="playlist-info" class="hidden">
+      <p>Videos found: <span id="video-count">0</span></p>
+      <div id="video-list"></div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  width: 300px;
+  background-color: #f9f9f9;
+  color: #333;
+}
+
+.container {
+  padding: 15px;
+}
+
+h2 {
+  font-size: 16px;
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #cc0000;
+  text-align: center;
+}
+
+.btn {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn.primary {
+  background-color: #cc0000;
+  color: white;
+}
+
+.btn.primary:hover {
+  background-color: #aa0000;
+}
+
+.btn.secondary {
+  background-color: #e0e0e0;
+  color: #333;
+}
+
+.btn.secondary:hover {
+  background-color: #ccc;
+}
+
+.status {
+  padding: 8px;
+  margin-bottom: 15px;
+  border-radius: 4px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.status.info {
+  background-color: #e3f2fd;
+  color: #0d47a1;
+  border: 1px solid #bbdefb;
+}
+
+.status.success {
+  background-color: #e8f5e9;
+  color: #1b5e20;
+  border: 1px solid #c8e6c9;
+}
+
+.status.error {
+  background-color: #ffebee;
+  color: #b71c1c;
+  border: 1px solid #ffcdd2;
+}
+
+.hidden {
+  display: none !important;
+}
+
+#playlist-info {
+  margin-top: 15px;
+  font-size: 12px;
+  border-top: 1px solid #ddd;
+  padding-top: 10px;
+}
+
+#video-list {
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  background: white;
+  border-radius: 4px;
+}
+
+.video-item {
+  padding: 5px 8px;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.video-item:last-child {
+  border-bottom: none;
+}
+.video-item.active {
+  background-color: #e8f5e9;
+  font-weight: bold;
+}
