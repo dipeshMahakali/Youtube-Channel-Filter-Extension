@@ -1,29 +1,41 @@
 // content.js
 // This script runs on all youtube.com pages as defined in manifest.json
 
+/**
+ * Checks if the extension context is still valid.
+ * This is crucial to prevent "Extension context invalidated" errors after reloads.
+ */
 function isContextValid() {
   return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
 }
 
-function init() {
+/**
+ * Safe wrapper for chrome.storage.local.get
+ */
+function safeGetStorage(keys, callback) {
   if (!isContextValid()) return;
-
-  chrome.storage.local.get(['ytPlaylist', 'ytCurrentIndex'], (result) => {
+  chrome.storage.local.get(keys, (result) => {
     if (!isContextValid()) return;
-    
+    callback(result);
+  });
+}
+
+function init() {
+  console.log('YouTube Play All: Initializing...');
+  safeGetStorage(['ytPlaylist', 'ytCurrentIndex'], (result) => {
     const playlist = result.ytPlaylist;
     const currentIndex = result.ytCurrentIndex;
 
-    // Check if we have an active playlist
     if (!playlist || playlist.length === 0 || currentIndex === undefined) {
+      console.log('YouTube Play All: No active playlist found.');
       return;
     }
 
-    // Check if we are on a playback page (Watch or Shorts)
     const isWatch = window.location.href.includes('/watch');
     const isShorts = window.location.href.includes('/shorts/');
     
     if (!isWatch && !isShorts) {
+      console.log('YouTube Play All: Not on a playback page.');
       return;
     }
 
@@ -32,88 +44,91 @@ function init() {
 }
 
 function getVideoElement() {
-  // Shorts-specific active video element
   const shortsVideo = document.querySelector('ytd-reel-video-renderer[is-active] video.video-stream');
   if (shortsVideo) return shortsVideo;
-  
-  // Regular YouTube video element
   return document.querySelector('video.html5-main-video');
 }
 
+let checkInterval = null;
+
 function setupPlayback(playlist, currentIndex, isShorts) {
-  // It takes a moment for the YouTube video player to load
+  // Clear any existing interval to prevent multiple monitors
+  if (checkInterval) clearInterval(checkInterval);
+  
   let attempts = 0;
-  const checkInterval = setInterval(() => {
+  checkInterval = setInterval(() => {
+    // CRITICAL: Check context validity at the very start of the interval
+    if (!isContextValid()) {
+      clearInterval(checkInterval);
+      return;
+    }
+
     attempts++;
     const video = getVideoElement();
     
     if (video) {
       clearInterval(checkInterval);
-      
       console.log('YouTube Play All: Attached to video player');
       
-      // Auto-play might be blocked by browser policies, let's try to ensure it plays
       if (video.paused) {
-        video.play().catch(e => console.log('Auto-play blocked, user interaction required.', e));
+        video.play().catch(e => console.log('YouTube Play All: Auto-play blocked.', e));
       }
 
-      // Ensure we don't attach multiple listeners
-      if (!video.hasAttribute('data-yt-play-all-attached')) {
-        // Remove previous listener if exists
-        video.removeEventListener('ended', onVideoEnded);
-        
-        // Add the ended event listener
-        video.addEventListener('ended', onVideoEnded);
-        video.setAttribute('data-yt-play-all-attached', 'true');
-        
-        // Safety: If it's a Short, it might loop instead of firing 'ended'
-        if (isShorts) {
-          const checkShortsEnd = () => {
-             // Close to end (within 0.5s or 1% of duration)
-             if (video.duration > 0 && video.currentTime >= video.duration - 0.5) {
-                video.removeEventListener('timeupdate', checkShortsEnd);
-                if (!video.hasAttribute('data-yt-play-all-completed')) {
-                   console.log('YouTube Play All: Short reached end, moving to next...');
-                   onVideoEnded();
-                }
-             }
-          };
-          video.addEventListener('timeupdate', checkShortsEnd);
-        }
-        
-        // Fallback: If video doesn't trigger 'ended' event after timeout, manually trigger next
-        const duration = video.duration;
-        const videoDuration = isFinite(duration) && duration > 0 ? duration : 60; // Default 60 seconds if duration unknown
-        
-        setTimeout(() => {
-          if (!isContextValid()) return;
-          if (!video.hasAttribute('data-yt-play-all-completed')) {
-            console.log('YouTube Play All: Video timeout reached, moving to next...');
-            video.setAttribute('data-yt-play-all-completed', 'true');
-            onVideoEnded();
-          }
-        }, (videoDuration + 5) * 1000); // Add 5 second buffer
+      // We always re-initialize listeners on navigation to handle SPA element reuse
+      // First, remove old listeners to avoid duplicates
+      video.removeEventListener('ended', onVideoEnded);
+      video.removeEventListener('timeupdate', checkShortsEnd);
+      
+      // Reset completion attribute for the new video
+      video.removeAttribute('data-yt-play-all-completed');
+      
+      // Add the ended event listener
+      video.addEventListener('ended', onVideoEnded);
+      video.setAttribute('data-yt-play-all-attached', 'true');
+      
+      if (isShorts) {
+        video.addEventListener('timeupdate', checkShortsEnd);
       }
+      
+      // Fallback timeout
+      const duration = video.duration;
+      const videoDuration = isFinite(duration) && duration > 0 ? duration : 60;
+      
+      setTimeout(() => {
+        if (!isContextValid()) return;
+        if (!video.hasAttribute('data-yt-play-all-completed')) {
+          console.log('YouTube Play All: Fallback timeout reached.');
+          onVideoEnded();
+        }
+      }, (videoDuration + 8) * 1000); // 8 second buffer for stability
     } else if (attempts > 30) {
-      // Stop after 30 seconds of searching
       clearInterval(checkInterval);
-      console.log('YouTube Play All: Could not find video element after 30 attempts.');
+      console.log('YouTube Play All: Video player not found.');
     }
   }, 1000);
+}
+
+function checkShortsEnd(event) {
+  const video = event.target;
+  if (video.duration > 0 && video.currentTime >= video.duration - 0.5) {
+    if (!video.hasAttribute('data-yt-play-all-completed')) {
+      video.removeEventListener('timeupdate', checkShortsEnd);
+      console.log('YouTube Play All: Short reached end.');
+      onVideoEnded();
+    }
+  }
 }
 
 function onVideoEnded() {
   if (!isContextValid()) return;
 
-  // Mark current video as completed to prevent double-triggering
   const video = getVideoElement();
   if (video) {
+    if (video.hasAttribute('data-yt-play-all-completed')) return; // Already triggered
     video.setAttribute('data-yt-play-all-completed', 'true');
   }
 
-  chrome.storage.local.get(['ytPlaylist', 'ytCurrentIndex'], (result) => {
-    if (!isContextValid()) return;
-    
+  safeGetStorage(['ytPlaylist', 'ytCurrentIndex'], (result) => {
     const playlist = result.ytPlaylist;
     let currentIndex = result.ytCurrentIndex;
 
@@ -122,28 +137,28 @@ function onVideoEnded() {
     currentIndex++;
 
     if (currentIndex < playlist.length) {
-      // Save new index and navigate to next video
       chrome.storage.local.set({ ytCurrentIndex: currentIndex }, () => {
         if (!isContextValid()) return;
-        console.log(`YouTube Play All: Playing next video (${currentIndex + 1} of ${playlist.length})`);
+        console.log(`YouTube Play All: Moving to ${currentIndex + 1}/${playlist.length}`);
         window.location.href = playlist[currentIndex].url;
       });
     } else {
-      console.log('YouTube Play All: Playlist finished.');
+      console.log('YouTube Play All: Playlist complete.');
       chrome.storage.local.remove(['ytPlaylist', 'ytCurrentIndex']);
     }
   });
 }
 
-// Run init on load
+// Initial run
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
   init();
 }
 
-// YouTube SPA navigation events
+// Listen for YouTube's SPA navigation events
 document.addEventListener('yt-navigate-finish', () => {
-  init();
+  if (isContextValid()) init();
 });
+
 

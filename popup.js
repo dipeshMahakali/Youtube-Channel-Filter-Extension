@@ -97,58 +97,58 @@ function gatherVideos() {
   const videos = [];
   const seenUrls = new Set();
 
-  // 1. Gather regular videos
-  const videoSelectors = 'a#video-title-link, a.yt-simple-endpoint.ytd-grid-video-renderer, a.yt-simple-endpoint[href*="/watch"]';
-  document.querySelectorAll(videoSelectors).forEach(el => {
-    const url = el.href;
-    const title = el.textContent.trim();
-    if (url && url.includes('/watch') && title && !seenUrls.has(url)) {
-      seenUrls.add(url);
-      videos.push({ url, title });
+  function addVideo(url, title) {
+    if (!url || seenUrls.has(url)) return;
+    
+    // Clean URL
+    let cleanUrl = url;
+    if (url.includes('/watch')) {
+      const urlObj = new URL(url);
+      const videoId = urlObj.searchParams.get('v');
+      if (videoId) cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    } else if (url.includes('/shorts/')) {
+      cleanUrl = url.split('?')[0];
     }
+
+    if (seenUrls.has(cleanUrl)) return;
+    seenUrls.add(cleanUrl);
+    videos.push({ url: cleanUrl, title: title || 'Untitled Video' });
+  }
+
+  // 1. Gather regular videos with diverse selectors
+  const selectors = [
+    'a#video-title-link',
+    'a.yt-simple-endpoint.ytd-grid-video-renderer',
+    'a.yt-simple-endpoint[href*="/watch"]',
+    'ytd-grid-video-renderer a#video-title',
+    'ytd-rich-grid-media a#video-title-link',
+    'ytd-video-renderer a#video-title'
+  ];
+
+  document.querySelectorAll(selectors.join(', ')).forEach(el => {
+    addVideo(el.href, el.textContent.trim());
   });
 
-  // 2. Gather YouTube Shorts - they're in different containers
-  // Look for all anchor tags that contain /shorts/ in href
-  document.querySelectorAll('a[href*="/shorts/"]').forEach(el => {
-    const url = el.href;
-    // Extract clean shorts URL (sometimes it has extra params)
-    const cleanUrl = url.split('?')[0];
-    let title = el.textContent.trim();
-    
-    // If no direct text, try to find it from parent elements
-    if (!title) {
-      const parent = el.closest('ytd-rich-item-renderer, ytd-video-renderer, [role="listitem"]');
-      if (parent) {
-        const titleEl = parent.querySelector('[role="link"]');
-        title = titleEl ? titleEl.textContent.trim() : 'Untitled Short';
-      } else {
-        title = 'Untitled Short';
-      }
-    }
-    
-    if (cleanUrl && cleanUrl.includes('/shorts/') && !seenUrls.has(cleanUrl)) {
-      seenUrls.add(cleanUrl);
-      videos.push({ url: cleanUrl, title });
-    }
-  });
+  // 2. Gather YouTube Shorts
+  const shortsSelectors = [
+    'a[href*="/shorts/"]',
+    'ytd-reel-item-renderer a',
+    'ytd-rich-item-renderer a[href*="/shorts/"]'
+  ];
 
-  // 3. Additional fallback: check for shorts in rich item renderers
-  document.querySelectorAll('ytd-rich-item-renderer').forEach(item => {
-    const link = item.querySelector('a[href*="/shorts/"]');
-    if (link) {
-      const url = link.href.split('?')[0];
-      let title = link.textContent.trim();
+  document.querySelectorAll(shortsSelectors.join(', ')).forEach(el => {
+    if (el.href && el.href.includes('/shorts/')) {
+      let title = el.textContent.trim();
       if (!title) {
-        const titleEl = item.querySelector('span[aria-label*="video"]') || item.querySelector('[aria-label]');
-        title = titleEl ? titleEl.getAttribute('aria-label') || titleEl.textContent.trim() : 'Untitled Short';
+        const parent = el.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-reel-item-renderer');
+        const titleEl = parent ? parent.querySelector('#video-title, [role="link"], h3') : null;
+        title = titleEl ? titleEl.textContent.trim() : 'Untitled Short';
       }
-      if (url && !seenUrls.has(url)) {
-        seenUrls.add(url);
-        videos.push({ url, title });
-      }
+      addVideo(el.href, title);
     }
   });
 
+  console.log(`YouTube Play All: Gathered ${videos.length} items.`);
   return videos;
 }
+
