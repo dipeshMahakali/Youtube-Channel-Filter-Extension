@@ -94,20 +94,59 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // This function runs in the context of the YouTube page
 function gatherVideos() {
-  // Common selectors for YouTube video links on channel pages
-  const videoElements = document.querySelectorAll('a#video-title-link, a.yt-simple-endpoint.ytd-grid-video-renderer');
   const videos = [];
-  
-  // Create a Set to ensure unique URLs
   const seenUrls = new Set();
 
-  videoElements.forEach(el => {
+  // 1. Gather regular videos
+  const videoSelectors = 'a#video-title-link, a.yt-simple-endpoint.ytd-grid-video-renderer, a.yt-simple-endpoint[href*="/watch"]';
+  document.querySelectorAll(videoSelectors).forEach(el => {
     const url = el.href;
     const title = el.textContent.trim();
-    
-    if (url && url.includes('/watch') && !seenUrls.has(url)) {
+    if (url && url.includes('/watch') && title && !seenUrls.has(url)) {
       seenUrls.add(url);
       videos.push({ url, title });
+    }
+  });
+
+  // 2. Gather YouTube Shorts - they're in different containers
+  // Look for all anchor tags that contain /shorts/ in href
+  document.querySelectorAll('a[href*="/shorts/"]').forEach(el => {
+    const url = el.href;
+    // Extract clean shorts URL (sometimes it has extra params)
+    const cleanUrl = url.split('?')[0];
+    let title = el.textContent.trim();
+    
+    // If no direct text, try to find it from parent elements
+    if (!title) {
+      const parent = el.closest('ytd-rich-item-renderer, ytd-video-renderer, [role="listitem"]');
+      if (parent) {
+        const titleEl = parent.querySelector('[role="link"]');
+        title = titleEl ? titleEl.textContent.trim() : 'Untitled Short';
+      } else {
+        title = 'Untitled Short';
+      }
+    }
+    
+    if (cleanUrl && cleanUrl.includes('/shorts/') && !seenUrls.has(cleanUrl)) {
+      seenUrls.add(cleanUrl);
+      videos.push({ url: cleanUrl, title });
+    }
+  });
+
+  // 3. Additional fallback: check for shorts in rich item renderers
+  document.querySelectorAll('ytd-rich-item-renderer').forEach(item => {
+    const link = item.querySelector('a[href*="/shorts/"]');
+    if (link) {
+      const url = link.href.split('?')[0];
+      let title = link.textContent.trim();
+      if (!title) {
+        const titleEl = item.querySelector('span[aria-label*="video"]') || item.querySelector('[aria-label]');
+        title = titleEl ? titleEl.getAttribute('aria-label') || titleEl.textContent.trim() : 'Untitled Short';
+      }
+      if (url && !seenUrls.has(url)) {
+        seenUrls.add(url);
+        videos.push({ url, title });
+      }
     }
   });
 
