@@ -144,9 +144,94 @@ function onVideoEnded() {
       });
     } else {
       console.log('YouTube Play All: Playlist complete.');
-      chrome.storage.local.remove(['ytPlaylist', 'ytCurrentIndex']);
+      // Pause to prevent any native auto-navigation
+      const video = getVideoElement();
+      if (video) video.pause();
+
+      chrome.storage.local.remove(['ytPlaylist', 'ytCurrentIndex'], () => {
+        // 1. Send message to background for global notification (across tabs)
+        chrome.runtime.sendMessage({ type: 'PLAYLIST_ENDED' });
+
+        // 2. Show fancy local alert
+        showFancyAlert('Playlist Ended', 'All videos have been played successfully.');
+      });
     }
   });
+}
+
+/**
+ * Creates and shows a modern, fancy modal alert on the page.
+ */
+function showFancyAlert(title, message) {
+  // Remove any existing modal
+  const existing = document.getElementById('yt-play-all-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'yt-play-all-modal';
+  Object.assign(modal.style, {
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backdropFilter: 'blur(5px)',
+    zIndex: '999999',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    animation: 'yt-play-all-fade-in 0.3s ease-out'
+  });
+
+  const content = document.createElement('div');
+  Object.assign(content.style, {
+    backgroundColor: '#1f1f1f',
+    borderRadius: '16px',
+    padding: '32px',
+    maxWidth: '400px',
+    width: '90%',
+    textAlign: 'center',
+    boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    color: '#fff',
+    fontFamily: '"Roboto", "Arial", sans-serif'
+  });
+
+  content.innerHTML = `
+    <div style="font-size: 48px; margin-bottom: 16px;">📹</div>
+    <h2 style="margin: 0 0 12px 0; font-size: 24px; font-weight: 500;">${title}</h2>
+    <p style="margin: 0 0 24px 0; color: #aaa; line-height: 1.5;">${message}</p>
+    <button id="yt-play-all-close" style="
+      background: #f00;
+      color: white;
+      border: none;
+      padding: 12px 32px;
+      border-radius: 24px;
+      font-size: 16px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: transform 0.2s, background 0.2s;
+    ">Dismiss</button>
+  `;
+
+  modal.appendChild(content);
+  document.body.appendChild(modal);
+
+  // Add keyframe animation for fade-in
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes yt-play-all-fade-in { from { opacity: 0; } to { opacity: 1; } }
+    #yt-play-all-close:hover { background: #df0000; transform: scale(1.05); }
+    #yt-play-all-close:active { transform: scale(0.95); }
+  `;
+  document.head.appendChild(style);
+
+  document.getElementById('yt-play-all-close').onclick = () => {
+    modal.style.opacity = '0';
+    modal.style.transition = 'opacity 0.2s ease-out';
+    setTimeout(() => modal.remove(), 200);
+  };
 }
 
 // Initial run

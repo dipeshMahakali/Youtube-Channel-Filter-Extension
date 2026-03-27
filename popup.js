@@ -94,13 +94,80 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // This function runs in the context of the YouTube page
 function gatherVideos() {
-  const videos = [];
-  const seenUrls = new Set();
+  const unwatched = [];
+  const watched   = [];
+  const seenUrls  = new Set();
 
-  function addVideo(url, title) {
+  /**
+   * Returns true when the renderer is a scheduled / upcoming video that has
+   * not been published yet and therefore cannot be played.
+   *
+   * YouTube signals this in two reliable ways:
+   *  1. An overlay badge with overlay-style="UPCOMING" on the thumbnail.
+   *  2. A metadata-line span whose text starts with "Scheduled", "Premieres",
+   *     or "Upcoming" (YouTube uses all three depending on locale / feature).
+   */
+  function isScheduled(rendererEl) {
+    if (!rendererEl) return false;
+
+    // Signal 1 – overlay badge (most reliable, locale-independent)
+    if (rendererEl.querySelector(
+      'ytd-thumbnail-overlay-time-status-renderer[overlay-style="UPCOMING"]'
+    )) return true;
+
+    // Signal 2 – metadata text (catches edge cases & localised strings)
+    const metaSpans = rendererEl.querySelectorAll('#metadata-line span, .ytd-video-meta-block span');
+    for (const span of metaSpans) {
+      const text = span.textContent.trim().toLowerCase();
+      if (
+        text.startsWith('scheduled') ||
+        text.startsWith('premieres') ||
+        text.startsWith('upcoming')
+      ) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Returns true when a video renderer element has a meaningful watch-progress
+   * bar (YouTube's red #progress div inside a#thumbnail).
+   * "Meaningful" means the element exists AND has a non-zero CSS width.
+   */
+  function isWatched(rendererEl) {
+    if (!rendererEl) return false;
+
+    // Walk into the thumbnail anchor, then look for the progress div
+    const thumbnail = rendererEl.querySelector('a#thumbnail, ytd-thumbnail a#thumbnail');
+    const progressEl = thumbnail
+      ? thumbnail.querySelector('div#progress')
+      : rendererEl.querySelector('div#progress');          // fallback
+
+    if (!progressEl) return false;
+
+    // YouTube sets width as an inline style, e.g. style="width: 73%;"
+    const widthStyle = progressEl.style.width || '';
+    const widthValue = parseFloat(widthStyle);             // NaN when empty / "0%"
+    return !isNaN(widthValue) && widthValue > 0;
+  }
+
+  /**
+   * Cleans a raw href and pushes it into the correct bucket.
+   * Scheduled videos are silently skipped.
+   * @param {string}       url      – raw href from the anchor element
+   * @param {string}       title    – video title text
+   * @param {Element|null} renderer – the nearest ytd-*-renderer ancestor (may be null)
+   */
+  function addVideo(url, title, renderer) {
     if (!url || seenUrls.has(url)) return;
-    
-    // Clean URL
+
+    // Skip scheduled / upcoming videos — they cannot be played
+    if (isScheduled(renderer)) {
+      console.log(`YouTube Play All: Skipping scheduled video – "${title}"`);
+      return;
+    }
+
+    // Normalise URL so duplicates are caught regardless of extra params
     let cleanUrl = url;
     if (url.includes('/watch')) {
       const urlObj = new URL(url);
@@ -112,11 +179,22 @@ function gatherVideos() {
 
     if (seenUrls.has(cleanUrl)) return;
     seenUrls.add(cleanUrl);
-    videos.push({ url: cleanUrl, title: title || 'Untitled Video' });
+
+    const entry = { url: cleanUrl, title: title || 'Untitled Video' };
+
+    if (isWatched(renderer)) {
+      watched.push(entry);
+    } else {
+      unwatched.push(entry);
+    }
   }
 
-  // 1. Gather regular videos with diverse selectors
-  const selectors = [
+  // ── 1. Regular videos ──────────────────────────────────────────────────────
+  const RENDERER_SELECTOR =
+    'ytd-rich-item-renderer, ytd-grid-video-renderer, ytd-video-renderer, ' +
+    'ytd-rich-grid-media, ytd-compact-video-renderer';
+
+  const titleSelectors = [
     'a#video-title-link',
     'a.yt-simple-endpoint.ytd-grid-video-renderer',
     'a.yt-simple-endpoint[href*="/watch"]',
@@ -125,11 +203,12 @@ function gatherVideos() {
     'ytd-video-renderer a#video-title'
   ];
 
-  document.querySelectorAll(selectors.join(', ')).forEach(el => {
-    addVideo(el.href, el.textContent.trim());
+  document.querySelectorAll(titleSelectors.join(', ')).forEach(el => {
+    const renderer = el.closest(RENDERER_SELECTOR) || null;
+    addVideo(el.href, el.textContent.trim(), renderer);
   });
 
-  // 2. Gather YouTube Shorts
+  // ── 2. YouTube Shorts ──────────────────────────────────────────────────────
   const shortsSelectors = [
     'a[href*="/shorts/"]',
     'ytd-reel-item-renderer a',
@@ -137,18 +216,33 @@ function gatherVideos() {
   ];
 
   document.querySelectorAll(shortsSelectors.join(', ')).forEach(el => {
-    if (el.href && el.href.includes('/shorts/')) {
-      let title = el.textContent.trim();
-      if (!title) {
-        const parent = el.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-reel-item-renderer');
-        const titleEl = parent ? parent.querySelector('#video-title, [role="link"], h3') : null;
-        title = titleEl ? titleEl.textContent.trim() : 'Untitled Short';
-      }
-      addVideo(el.href, title);
+    if (!el.href || !el.href.includes('/shorts/')) return;
+
+    let title = el.textContent.trim();
+    if (!title) {
+      const parent = el.closest(
+        'ytd-rich-item-renderer, ytd-video-renderer, ytd-reel-item-renderer'
+      );
+      const titleEl = parent
+        ? parent.querySelector('#video-title, [role="link"], h3')
+        : null;
+      title = titleEl ? titleEl.textContent.trim() : 'Untitled Short';
     }
+
+    const renderer = el.closest(RENDERER_SELECTOR) || null;
+    addVideo(el.href, title, renderer);
   });
 
-  console.log(`YouTube Play All: Gathered ${videos.length} items.`);
-  return videos;
+  // ── 3. Build result ────────────────────────────────────────────────────────
+  // Prefer unwatched videos. Only fall back to watched videos when there are
+  // literally zero unwatched ones left on the page.
+  const result = unwatched.length > 0 ? unwatched : watched;
+
+  console.log(
+    `YouTube Play All: Gathered ${result.length} items ` +
+    `(${unwatched.length} unwatched, ${watched.length} watched). ` +
+    (unwatched.length === 0 ? 'Falling back to watched videos.' : 'Returning unwatched only.')
+  );
+  return result;
 }
 
